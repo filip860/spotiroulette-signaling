@@ -42,9 +42,10 @@ app.post('/queue/join', (req, res) => {
     if (queue.length > 0) {
         const partner = queue.shift();
 
-        // Create bidirectional match
-        matches.set(oderId, { oderId: partner.oderId, odername: partner.odername });
-        matches.set(partner.oderId, { oderId: oderId, odername: odername });
+        // Create bidirectional match with timestamp
+        const matchTime = Date.now();
+        matches.set(oderId, { oderId: partner.oderId, odername: partner.odername, timestamp: matchTime });
+        matches.set(partner.oderId, { oderId: oderId, odername: odername, timestamp: matchTime });
 
         console.log(`[MATCH] ${odername} <-> ${partner.odername}`);
 
@@ -147,32 +148,45 @@ peerServer.on('connection', (client) => {
 peerServer.on('disconnect', (client) => {
     console.log(`[PEER] Disconnected: ${client.getId()}`);
 
-    // Clean up queue if user disconnects
+    // Only clean up queue, NOT matches
+    // Matches should persist so users can reconnect (especially on mobile)
     const index = queue.findIndex(p => p.oderId === client.getId());
     if (index !== -1) {
         console.log(`[QUEUE] Removing disconnected: ${queue[index].odername}`);
         queue.splice(index, 1);
     }
-    matches.delete(client.getId());
+    // Don't delete matches here - let cleanup interval handle stale ones
 });
 
 // ==================== CLEANUP ====================
 
-// Remove stale queue entries every 30 seconds
+// Remove stale queue and match entries every 30 seconds
 setInterval(() => {
     const now = Date.now();
-    const staleTimeout = 120000; // 2 minutes
-    let removed = 0;
+    const queueTimeout = 120000; // 2 minutes for queue
+    const matchTimeout = 300000; // 5 minutes for matches
+    let removedQueue = 0;
+    let removedMatches = 0;
 
+    // Clean stale queue entries
     for (let i = queue.length - 1; i >= 0; i--) {
-        if (now - queue[i].timestamp > staleTimeout) {
-            console.log(`[CLEANUP] Removing stale: ${queue[i].odername}`);
+        if (now - queue[i].timestamp > queueTimeout) {
+            console.log(`[CLEANUP] Removing stale queue: ${queue[i].odername}`);
             queue.splice(i, 1);
-            removed++;
+            removedQueue++;
         }
     }
 
-    if (removed > 0) {
-        console.log(`[CLEANUP] Removed ${removed} stale entries`);
+    // Clean stale match entries
+    for (const [oderId, match] of matches.entries()) {
+        if (match.timestamp && now - match.timestamp > matchTimeout) {
+            console.log(`[CLEANUP] Removing stale match: ${oderId}`);
+            matches.delete(oderId);
+            removedMatches++;
+        }
+    }
+
+    if (removedQueue > 0 || removedMatches > 0) {
+        console.log(`[CLEANUP] Removed ${removedQueue} queue, ${removedMatches} matches`);
     }
 }, 30000);
