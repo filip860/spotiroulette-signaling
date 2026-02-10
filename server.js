@@ -21,14 +21,22 @@ app.post('/queue/join', (req, res) => {
         return res.status(400).json({ error: 'oderId required' });
     }
 
+    // Check if user already has a match (reconnect scenario)
+    const existingMatch = matches.get(oderId);
+    if (existingMatch) {
+        console.log(`[QUEUE] ${odername} already matched with ${existingMatch.odername}, returning existing match`);
+        return res.json({
+            matched: true,
+            partnerId: existingMatch.oderId,
+            partnerName: existingMatch.odername
+        });
+    }
+
     // Remove if already in queue (rejoin scenario)
     const existingIndex = queue.findIndex(p => p.oderId === oderId);
     if (existingIndex !== -1) {
         queue.splice(existingIndex, 1);
     }
-
-    // Also remove any existing match
-    matches.delete(oderId);
 
     // Check if someone is waiting in the queue
     if (queue.length > 0) {
